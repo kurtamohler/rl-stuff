@@ -147,16 +147,23 @@ class TrenchRunnerEnv(gym.Env):
         pygame.event.pump()
         pygame.display.flip()
 
+    def check_quit(self):
+        if self.screen is not None:
+            import pygame
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    return True
+
+        return False
+
+
     def close(self, force=False):
         if self.screen is not None:
             import pygame
 
             if not force:
-                running = True
-                while running:
-                    for event in pygame.event.get():
-                        if event.type == pygame.QUIT:
-                            running = False
+                while not self.check_quit():
+                    pass
 
             pygame.display.quit()
             pygame.quit()
@@ -168,12 +175,14 @@ if __name__ == '__main__':
 
     done = False
 
-    while not done:
+    while True:
         observation, reward, done, info = env.step(env.Action.left)
         env.render()
+
         if done:
             done = False
             observation = env.reset()
             env.render()
 
-    env.close()
+        if env.check_quit():
+            env.close(force=True)
