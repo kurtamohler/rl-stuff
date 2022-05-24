@@ -32,6 +32,8 @@ class TrenchRunnerEnv(gym.Env):
         self.ship_y = 1
         self.ship_x = self.SIZE_X // 2
         self.done = False
+        self.screen = None
+        self.clock = None
 
     def get_observation(self):
         observation = self.state.copy()
@@ -89,13 +91,89 @@ class TrenchRunnerEnv(gym.Env):
 
         return observation
 
+    def render(self, mode='human'):
+        try:
+            import pygame
+            from pygame import gfxdraw
+        except ImportError:
+            raise DependencyNotInstalled(
+                'pygame is not installed, run `pip install gym`')
+
+        screen_scale = 75
+
+        screen_width = self.SIZE_X * screen_scale
+        screen_height = self.SIZE_Y * screen_scale
+
+        if self.state is None:
+            return None
+
+        x = self.state
+
+        if self.screen is None:
+            pygame.init()
+            pygame.display.init()
+            self.screen = pygame.display.set_mode((screen_width, screen_height))
+        if self.clock is None:
+            self.clock = pygame.time.Clock()
+
+        self.surf = pygame.Surface((screen_width, screen_height))
+        self.surf.fill((255, 255, 255))
+
+        # Draw the ship
+        gfxdraw.box(
+            self.surf,
+            pygame.Rect(
+                (self.ship_x * screen_scale, self.ship_y * screen_scale),
+                (screen_scale, screen_scale)),
+            (90, 100, 255))
+
+        # Draw the obstacles. If there's a collision, the obstacle will cover
+        # the ship, as if the ship was destroyed
+        for state_y in range(0, self.state.shape[0]):
+            for state_x in range(0, self.state.shape[1]):
+                if self.state[state_y][state_x]:
+                    gfxdraw.box(
+                        self.surf,
+                        pygame.Rect(
+                            (state_x * screen_scale, state_y * screen_scale),
+                            (screen_scale, screen_scale)),
+                        (255, 100, 100))
+
+        self.screen.blit(self.surf, (0, 0))
+
+        if mode == 'human':
+            self.clock.tick(24)
+
+        pygame.event.pump()
+        pygame.display.flip()
+
+    def close(self, force=False):
+        if self.screen is not None:
+            import pygame
+
+            if not force:
+                running = True
+                while running:
+                    for event in pygame.event.get():
+                        if event.type == pygame.QUIT:
+                            running = False
+
+            pygame.display.quit()
+            pygame.quit()
+
 if __name__ == '__main__':
     env = TrenchRunnerEnv()
     observation = env.reset()
-    print(observation)
+    env.render()
+
     done = False
 
     while not done:
-        observation, reward, done, info = env.step(env.Action.none)
-        print(observation)
+        observation, reward, done, info = env.step(env.Action.left)
+        env.render()
+        if done:
+            done = False
+            observation = env.reset()
+            env.render()
 
+    env.close()
