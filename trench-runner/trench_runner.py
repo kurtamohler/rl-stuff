@@ -10,6 +10,8 @@ class TrenchRunnerEnv(gym.Env):
     NUM_ACTIONS = 3
     SIZE_Y = 9
     SIZE_X = 9
+    SCREEN_SCALE = 75
+
     NUM_CHANNELS = 1
 
     class Action(Enum):
@@ -34,6 +36,7 @@ class TrenchRunnerEnv(gym.Env):
         self.done = False
         self.screen = None
         self.clock = None
+        self.iteration = 0
 
     def get_observation(self):
         observation = self.state.copy()
@@ -66,8 +69,10 @@ class TrenchRunnerEnv(gym.Env):
         # Choose a random position on the new row to place an obstacle
         # TODO: This can generate dead ends that are impossible to get through.
         # Need to fix that.
-        obstacle_x = np.random.randint(0, self.SIZE_X)
-        new_state[0][obstacle_x] = 1
+        if self.iteration % 3 == 0:
+            obstacle_x = np.random.randint(0, self.SIZE_X)
+            new_state[0][obstacle_x] = 1
+
         self.state = new_state
 
         observation = self.get_observation()
@@ -77,9 +82,12 @@ class TrenchRunnerEnv(gym.Env):
         if self.state[self.ship_y][self.ship_x]:
             self.done = True
 
+        self.iteration += 1
+
         return observation, reward, self.done, info
 
     def reset(self):
+        self.iteration = 0
         self.state = np.zeros((self.SIZE_X, self.SIZE_Y))
 
         self.ship_y = self.SIZE_Y - 2
@@ -99,7 +107,7 @@ class TrenchRunnerEnv(gym.Env):
             raise DependencyNotInstalled(
                 'pygame is not installed, run `pip install gym`')
 
-        screen_scale = 75
+        screen_scale = self.SCREEN_SCALE
 
         screen_width = self.SIZE_X * screen_scale
         screen_height = self.SIZE_Y * screen_scale
@@ -142,31 +150,24 @@ class TrenchRunnerEnv(gym.Env):
         self.screen.blit(self.surf, (0, 0))
 
         if mode == 'human':
-            self.clock.tick(24)
+            self.clock.tick(10)
 
         pygame.event.pump()
         pygame.display.flip()
 
-    def check_quit(self):
+    def stop(self):
         if self.screen is not None:
             import pygame
-            for event in pygame.event.get():
-                if event.type == pygame.QUIT:
-                    return True
-
-        return False
-
-
-    def close(self, force=False):
-        if self.screen is not None:
-            import pygame
-
-            if not force:
-                while not self.check_quit():
-                    pass
 
             pygame.display.quit()
             pygame.quit()
+            self.screen = None
+
+        self.done = True
+
+    def is_done(self):
+        return self.done
+
 
 if __name__ == '__main__':
     env = TrenchRunnerEnv()
@@ -175,8 +176,36 @@ if __name__ == '__main__':
 
     done = False
 
-    while True:
-        observation, reward, done, info = env.step(env.Action.left)
+    cur_action = env.Action.none
+
+    class EventHandler:
+        def __init__(self):
+            self.left = False
+            self.right = False
+
+        def check(self):
+            assert env.screen is not None
+            import pygame
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    env.stop()
+                    return
+
+                elif event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_LEFT:
+                        self.left = True
+                    elif event.key == pygame.K_RIGHT:
+                        self.right = True
+
+                elif event.type == pygame.KEYUP:
+                    if event.key == pygame.K_LEFT:
+                        self.left = False
+                    elif event.key == pygame.K_RIGHT:
+                        self.right = False
+    events = EventHandler()
+
+    while not env.is_done():
+        observation, reward, done, info = env.step(cur_action)
         env.render()
 
         if done:
@@ -184,5 +213,13 @@ if __name__ == '__main__':
             observation = env.reset()
             env.render()
 
-        if env.check_quit():
-            env.close(force=True)
+        events.check()
+
+        if events.left and not events.right:
+            cur_action = env.Action.left
+        elif events.right and not events.left:
+            cur_action = env.Action.right
+        else:
+            cur_action = env.Action.none
+
+
