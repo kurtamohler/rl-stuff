@@ -26,7 +26,7 @@ class TrenchRunnerEnv(gym.Env):
 
         self.observation_space = spaces.Box(
             low=0,
-            high=1,
+            high=2,
             shape=(self.SIZE_Y, self.SIZE_X, self.NUM_CHANNELS))
 
         self.state = np.zeros((self.SIZE_X, self.SIZE_Y))
@@ -40,7 +40,7 @@ class TrenchRunnerEnv(gym.Env):
 
     def get_observation(self):
         observation = self.state.copy()
-        observation[self.ship_y][self.ship_x] = 1
+        observation[self.ship_y][self.ship_x] = 2
         return observation
 
     def step(self, action):
@@ -150,7 +150,7 @@ class TrenchRunnerEnv(gym.Env):
         self.screen.blit(self.surf, (0, 0))
 
         if mode == 'human':
-            self.clock.tick(10)
+            self.clock.tick(100)
 
         pygame.event.pump()
         pygame.display.flip()

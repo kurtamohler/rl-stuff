@@ -7,25 +7,54 @@ import gym
 from gym.spaces import Discrete, Box
 from trench_runner import TrenchRunnerEnv
 
-def mlp(sizes, activation=nn.Tanh, output_activation=nn.Identity):
-    # Build a feedforward neural network.
-    layers = []
-    for j in range(len(sizes)-1):
-        act = activation if j < len(sizes)-2 else output_activation
-        layers += [nn.Linear(sizes[j], sizes[j+1]), act()]
-    return nn.Sequential(*layers)
+device = 'cpu'
 
 def my_mlp(observation_space, action_space):
+    # Works well
     return nn.Sequential(
         nn.Flatten(start_dim=-2, end_dim=-1),
         nn.Linear(
             torch.prod(torch.tensor(observation_space.shape)),
             32),
         nn.Tanh(),
-        nn.Linear(32, action_space.n),
-        nn.Identity())
+        nn.Linear(32, action_space.n)).to(device)
 
-def train(env_type_or_name='CartPole-v0', hidden_sizes=[32], lr=1e-2, 
+
+    # Slow and not sure if it works
+    #return nn.Sequential(
+    #    nn.Unflatten(-2, (1, 1, observation_space.shape[0])),
+    #    nn.Flatten(start_dim=0, end_dim=-4),
+    #    nn.Conv2d(1, 3, 5),
+    #    #nn.Tanh(),
+    #    nn.ReLU(),
+    #    nn.Flatten(start_dim=-3, end_dim=-1),
+    #    nn.Linear(5 * 5 * 3, action_space.n))
+
+    # Not too good
+    #return nn.Sequential(
+    #    nn.Flatten(start_dim=-2, end_dim=-1),
+    #    nn.Linear(
+    #        torch.prod(torch.tensor(observation_space.shape)),
+    #        16),
+    #    nn.Tanh(),
+    #    nn.Linear(16, 8),
+    #    nn.Tanh(),
+    #    nn.Linear(8, action_space.n)).to(device)
+
+    # Adapted from "Deep Reinforcement Learning in Action"
+    # Seems like it's crap for this application.
+    # But the original uses learning_rate = 0.0009
+    #l1 = torch.prod(torch.tensor(observation_space.shape))
+    #l2 = 150
+    #l3 = action_space.n
+    #return nn.Sequential(
+    #    nn.Flatten(start_dim=-2, end_dim=-1),
+    #    nn.Linear(l1, l2),
+    #    nn.LeakyReLU(),
+    #    nn.Linear(l2, l3))
+
+
+def train(env_type_or_name='CartPole-v0', hidden_sizes=[32], lr=0.0009, 
           epochs=50, batch_size=5000, render=False):
 
     if issubclass(env_type_or_name, gym.Env):
@@ -41,12 +70,6 @@ def train(env_type_or_name='CartPole-v0', hidden_sizes=[32], lr=1e-2,
     assert isinstance(env.action_space, Discrete), \
         "This example only works for envs with discrete action spaces."
 
-    #obs_dim = env.observation_space.shape[0]
-    #n_acts = env.action_space.n
-
-    # make core of policy network
-    #logits_net = mlp(sizes=[obs_dim]+hidden_sizes+[n_acts])
-
     logits_net = my_mlp(env.observation_space, env.action_space)
 
     # make function to compute action distribution
@@ -56,10 +79,8 @@ def train(env_type_or_name='CartPole-v0', hidden_sizes=[32], lr=1e-2,
 
     # make action selection function (outputs int actions, sampled from policy)
     def get_action(obs):
-        #return get_policy(obs).sample().item()
         policy = get_policy(obs)
         sample = policy.sample()
-        #print(sample)
         return sample.item()
 
     # make loss function whose gradient, for the right data, is policy gradient
@@ -98,7 +119,7 @@ def train(env_type_or_name='CartPole-v0', hidden_sizes=[32], lr=1e-2,
             batch_obs.append(obs.copy())
 
             # act in the environment
-            act = get_action(torch.as_tensor(obs, dtype=torch.float32))
+            act = get_action(torch.as_tensor(obs, dtype=torch.float32, device=device))
             obs, rew, done, _ = env.step(act)
 
             # save action, reward
@@ -114,6 +135,10 @@ def train(env_type_or_name='CartPole-v0', hidden_sizes=[32], lr=1e-2,
                 # the weight for each logprob(a|s) is R(tau)
                 batch_weights += [ep_ret] * ep_len
 
+                # Render the final state before resetting
+                if (not finished_rendering_this_epoch) and render:
+                    env.render()
+
                 # reset episode-specific variables
                 obs, done, ep_rews = env.reset(), False, []
 
@@ -126,9 +151,9 @@ def train(env_type_or_name='CartPole-v0', hidden_sizes=[32], lr=1e-2,
 
         # take a single policy gradient update step
         optimizer.zero_grad()
-        batch_loss = compute_loss(obs=torch.as_tensor(batch_obs, dtype=torch.float32),
-                                  act=torch.as_tensor(batch_acts, dtype=torch.int32),
-                                  weights=torch.as_tensor(batch_weights, dtype=torch.float32)
+        batch_loss = compute_loss(obs=torch.as_tensor(batch_obs, dtype=torch.float32, device=device),
+                                  act=torch.as_tensor(batch_acts, dtype=torch.int32, device=device),
+                                  weights=torch.as_tensor(batch_weights, dtype=torch.float32, device=device)
                                   )
         batch_loss.backward()
         optimizer.step()
