@@ -6,6 +6,7 @@ import numpy as np
 import gym
 from gym.spaces import Discrete, Box
 from trench_runner import TrenchRunnerEnv
+import os
 
 device = 'cpu'
 
@@ -70,7 +71,14 @@ def train(env_type_or_name='CartPole-v0', hidden_sizes=[32], lr=0.0009,
     assert isinstance(env.action_space, Discrete), \
         "This example only works for envs with discrete action spaces."
 
-    logits_net = my_mlp(env.observation_space, env.action_space)
+    save_file = 'trench_policy_network.pt'
+
+    if os.path.exists(save_file):
+        print(f'loading existing network from file: {save_file}')
+        logits_net = torch.load(save_file)
+    else:
+        print(f'creating new network and saving to file: {save_file}')
+        logits_net = my_mlp(env.observation_space, env.action_space)
 
     # make function to compute action distribution
     def get_policy(obs):
@@ -157,6 +165,7 @@ def train(env_type_or_name='CartPole-v0', hidden_sizes=[32], lr=0.0009,
                                   )
         batch_loss.backward()
         optimizer.step()
+        torch.save(logits_net, save_file)
         return batch_loss, batch_rets, batch_lens
 
     # training loop
