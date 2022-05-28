@@ -72,6 +72,7 @@ def train(env_type_or_name='CartPole-v0', hidden_sizes=[32], lr=0.0009,
         "This example only works for envs with discrete action spaces."
 
     save_file = 'trench_policy_network.pt'
+    log_file = 'trench_policy_network.log'
 
     if os.path.exists(save_file):
         print(f'loading existing network from file: {save_file}')
@@ -159,9 +160,9 @@ def train(env_type_or_name='CartPole-v0', hidden_sizes=[32], lr=0.0009,
 
         # take a single policy gradient update step
         optimizer.zero_grad()
-        batch_loss = compute_loss(obs=torch.as_tensor(batch_obs, dtype=torch.float32, device=device),
-                                  act=torch.as_tensor(batch_acts, dtype=torch.int32, device=device),
-                                  weights=torch.as_tensor(batch_weights, dtype=torch.float32, device=device)
+        batch_loss = compute_loss(obs=torch.as_tensor(np.array(batch_obs), dtype=torch.float32, device=device),
+                                  act=torch.as_tensor(np.array(batch_acts), dtype=torch.int32, device=device),
+                                  weights=torch.as_tensor(np.array(batch_weights), dtype=torch.float32, device=device)
                                   )
         batch_loss.backward()
         optimizer.step()
@@ -171,8 +172,10 @@ def train(env_type_or_name='CartPole-v0', hidden_sizes=[32], lr=0.0009,
     # training loop
     for i in range(epochs):
         batch_loss, batch_rets, batch_lens = train_one_epoch()
-        print('epoch: %3d \t loss: %.3f \t return: %.3f \t ep_len: %.3f'%
-                (i, batch_loss, np.mean(batch_rets), np.mean(batch_lens)))
+        with open(log_file, 'a') as f:
+            info = 'epoch: %3d loss: %.3f return: %.3f ep_len: %.3f' % (i, batch_loss, np.mean(batch_rets), np.mean(batch_lens))
+            print(info)
+            f.write(info + '\n')
 
 if __name__ == '__main__':
     import argparse
@@ -181,5 +184,4 @@ if __name__ == '__main__':
     parser.add_argument('--render', action='store_true')
     parser.add_argument('--lr', type=float, default=1e-2)
     args = parser.parse_args()
-    print('\nUsing simplest formulation of policy gradient.\n')
     train(env_type_or_name=TrenchRunnerEnv, render=args.render, lr=args.lr, epochs=200_000)
