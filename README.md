@@ -17,7 +17,7 @@ control the blue square, and you need to avoid touching the red squares.
 To train a policy gradient network to play the game, you can run
 [dodgy/dodgy_policy_gradient.py](dodgy/dodgy_policy_gradient.py). There are
 several optional features like rendering the environment and saving the trained
-network to a faile, which are enabled with command line arguments. Run
+network to a file, which are enabled with command line arguments. Run
 `$ python dodgy_policy_gradient.py --help` for more information.
 
 Training the policy gradient network to play Dodgy usually only takes a few
