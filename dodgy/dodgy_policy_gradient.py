@@ -178,7 +178,8 @@ def run(env_type, *, lr=0.01, max_epochs=None, min_batch_size=5000, render=False
 
 if __name__ == '__main__':
     import argparse
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 
     parser.add_argument(
         '--render',
