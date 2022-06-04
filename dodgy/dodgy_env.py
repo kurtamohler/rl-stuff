@@ -3,8 +3,8 @@ from gym import spaces
 from enum import Enum
 import numpy as np
 
-class TrenchRunnerEnv(gym.Env):
-    '''Environment for Trench Runner game'''
+class DodgyEnv(gym.Env):
+    '''Environment for Dodgy game'''
     metadata = {'render.modes': ['human']}
 
     NUM_ACTIONS = 3
@@ -24,7 +24,7 @@ class TrenchRunnerEnv(gym.Env):
         right = 2
 
     def __init__(self):
-        super(TrenchRunnerEnv, self).__init__()
+        super(DodgyEnv, self).__init__()
 
         self.action_space = spaces.Discrete(len(self.Action))
 
@@ -175,7 +175,7 @@ class TrenchRunnerEnv(gym.Env):
 
 
 if __name__ == '__main__':
-    env = TrenchRunnerEnv()
+    env = DodgyEnv()
     observation = env.reset()
     env.render()
 

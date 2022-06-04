@@ -6,7 +6,7 @@ import gym
 import os
 import numpy as np
 
-from trench_runner import TrenchRunnerEnv
+from dodgy_env import DodgyEnv
 
 def create_policy_network(observation_space, action_space, device='cpu'):
     return nn.Sequential(
@@ -205,7 +205,7 @@ if __name__ == '__main__':
 
     min_batch_size = 0 if args.inference_mode else 5_000
 
-    run(TrenchRunnerEnv,
+    run(DodgyEnv,
         lr=args.lr,
         max_epochs=None,
         min_batch_size=min_batch_size,
