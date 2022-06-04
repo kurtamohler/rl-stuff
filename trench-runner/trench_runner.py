@@ -14,6 +14,10 @@ class TrenchRunnerEnv(gym.Env):
 
     NUM_CHANNELS = 1
 
+    BLANK_VAL = 0
+    OBSTACLE_VAL = 1
+    SHIP_VAL = 2
+
     class Action(Enum):
         none = 0
         left = 1
@@ -29,7 +33,7 @@ class TrenchRunnerEnv(gym.Env):
             high=2,
             shape=(self.SIZE_Y, self.SIZE_X, self.NUM_CHANNELS))
 
-        self.state = np.zeros((self.SIZE_X, self.SIZE_Y))
+        self.state = np.full((self.SIZE_X, self.SIZE_Y), self.BLANK_VAL)
 
         self.ship_y = 1
         self.ship_x = self.SIZE_X // 2
@@ -40,7 +44,8 @@ class TrenchRunnerEnv(gym.Env):
 
     def get_observation(self):
         observation = self.state.copy()
-        observation[self.ship_y][self.ship_x] = 2
+        if observation[self.ship_y][self.ship_x] != self.OBSTACLE_VAL:
+            observation[self.ship_y][self.ship_x] = self.SHIP_VAL
         return observation
 
     def step(self, action):
@@ -62,7 +67,7 @@ class TrenchRunnerEnv(gym.Env):
 
         # Shift the state down one, since the ship is moving forward
         new_state = np.concatenate((
-            np.zeros((1, self.SIZE_X)),
+            np.full((1, self.SIZE_X), self.BLANK_VAL),
             self.state[0:-1]
         ))
 
@@ -71,7 +76,7 @@ class TrenchRunnerEnv(gym.Env):
         # Need to fix that.
         if self.iteration % 3 == 0:
             obstacle_x = np.random.randint(0, self.SIZE_X)
-            new_state[0][obstacle_x] = 1
+            new_state[0][obstacle_x] = self.OBSTACLE_VAL
 
         self.state = new_state
 
@@ -79,7 +84,7 @@ class TrenchRunnerEnv(gym.Env):
         reward = 1.0
         info = {}
 
-        if self.state[self.ship_y][self.ship_x]:
+        if self.state[self.ship_y][self.ship_x] == self.OBSTACLE_VAL:
             self.done = True
 
         self.iteration += 1
@@ -88,7 +93,7 @@ class TrenchRunnerEnv(gym.Env):
 
     def reset(self):
         self.iteration = 0
-        self.state = np.zeros((self.SIZE_X, self.SIZE_Y))
+        self.state = np.full((self.SIZE_X, self.SIZE_Y), self.BLANK_VAL)
 
         self.ship_y = self.SIZE_Y - 2
         self.ship_x = self.SIZE_X // 2
@@ -139,7 +144,7 @@ class TrenchRunnerEnv(gym.Env):
         # the ship, as if the ship was destroyed
         for state_y in range(0, self.state.shape[0]):
             for state_x in range(0, self.state.shape[1]):
-                if self.state[state_y][state_x]:
+                if self.state[state_y][state_x] == self.OBSTACLE_VAL:
                     gfxdraw.box(
                         self.surf,
                         pygame.Rect(
@@ -150,7 +155,7 @@ class TrenchRunnerEnv(gym.Env):
         self.screen.blit(self.surf, (0, 0))
 
         if mode == 'human':
-            self.clock.tick(100)
+            self.clock.tick(15)
 
         pygame.event.pump()
         pygame.display.flip()

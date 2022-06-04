@@ -2,16 +2,13 @@ import torch
 import torch.nn as nn
 from torch.distributions.categorical import Categorical
 from torch.optim import Adam
-import numpy as np
 import gym
-from gym.spaces import Discrete, Box
-from trench_runner import TrenchRunnerEnv
 import os
+import numpy as np
 
-device = 'cpu'
+from trench_runner import TrenchRunnerEnv
 
-def my_mlp(observation_space, action_space):
-    # Works well
+def create_policy_network(observation_space, action_space, device='cpu'):
     return nn.Sequential(
         nn.Flatten(start_dim=-2, end_dim=-1),
         nn.Linear(
@@ -20,168 +17,199 @@ def my_mlp(observation_space, action_space):
         nn.Tanh(),
         nn.Linear(32, action_space.n)).to(device)
 
+def get_action_dist(policy_network, observation):
+    logits = policy_network(observation)
+    return Categorical(logits=logits)
 
-    # Slow and not sure if it works
-    #return nn.Sequential(
-    #    nn.Unflatten(-2, (1, 1, observation_space.shape[0])),
-    #    nn.Flatten(start_dim=0, end_dim=-4),
-    #    nn.Conv2d(1, 3, 5),
-    #    #nn.Tanh(),
-    #    nn.ReLU(),
-    #    nn.Flatten(start_dim=-3, end_dim=-1),
-    #    nn.Linear(5 * 5 * 3, action_space.n))
+def get_action(policy_network, observation):
+    action_dist = get_action_dist(policy_network, observation)
+    sample = action_dist.sample()
+    return sample.item()
 
-    # Not too good
-    #return nn.Sequential(
-    #    nn.Flatten(start_dim=-2, end_dim=-1),
-    #    nn.Linear(
-    #        torch.prod(torch.tensor(observation_space.shape)),
-    #        16),
-    #    nn.Tanh(),
-    #    nn.Linear(16, 8),
-    #    nn.Tanh(),
-    #    nn.Linear(8, action_space.n)).to(device)
+def compute_loss(policy_network, observation, action, weights):
+    action_dist = get_action_dist(policy_network, observation)
+    log_prob = action_dist.log_prob(action)
+    return -(log_prob * weights).mean()
 
-    # Adapted from "Deep Reinforcement Learning in Action"
-    # Seems like it's crap for this application.
-    # But the original uses learning_rate = 0.0009
-    #l1 = torch.prod(torch.tensor(observation_space.shape))
-    #l2 = 150
-    #l3 = action_space.n
-    #return nn.Sequential(
-    #    nn.Flatten(start_dim=-2, end_dim=-1),
-    #    nn.Linear(l1, l2),
-    #    nn.LeakyReLU(),
-    #    nn.Linear(l2, l3))
+def run_one_epoch(env, policy_network, optimizer, *, render=False, min_batch_size=5000, inference_mode=False, device='cpu'):
+    batch_observations = []
+    batch_actions = []
+    batch_weights = []
+    batch_returns = []
+    batch_lengths = []
 
+    observation = env.reset()
+    episode_done = False
+    episode_rewards = []
 
-def train(env_type_or_name='CartPole-v0', hidden_sizes=[32], lr=0.0009, 
-          epochs=50, batch_size=5000, render=False):
+    rendered_epoch = False
 
-    if issubclass(env_type_or_name, gym.Env):
-        env = env_type_or_name()
-    else:
-        # make environment, check spaces, get obs / act dims
-        env = gym.make(env_type_or_name)
-        if env_type_or_name == 'CartPole-v0':
-            env._max_episode_steps = 100_000
+    epoch_done = False
 
-    assert isinstance(env.observation_space, Box), \
-        "This example only works for envs with continuous state spaces."
-    assert isinstance(env.action_space, Discrete), \
-        "This example only works for envs with discrete action spaces."
+    while not epoch_done:
+        if (not rendered_epoch) and render:
+            env.render()
 
-    save_file = 'trench_policy_network.pt'
-    log_file = 'trench_policy_network.log'
+        batch_observations.append(observation.copy())
 
-    if os.path.exists(save_file):
-        print(f'loading existing network from file: {save_file}')
-        logits_net = torch.load(save_file)
-    else:
-        print(f'creating new network and saving to file: {save_file}')
-        logits_net = my_mlp(env.observation_space, env.action_space)
+        action = get_action(
+            policy_network,
+            torch.as_tensor(observation, dtype=torch.float32, device=device))
+        observation, reward, episode_done, _ = env.step(action)
 
-    # make function to compute action distribution
-    def get_policy(obs):
-        logits = logits_net(obs)
-        return Categorical(logits=logits)
+        batch_actions.append(action)
 
-    # make action selection function (outputs int actions, sampled from policy)
-    def get_action(obs):
-        policy = get_policy(obs)
-        sample = policy.sample()
-        return sample.item()
+        episode_rewards.append(reward)
 
-    # make loss function whose gradient, for the right data, is policy gradient
-    def compute_loss(obs, act, weights):
-        logp = get_policy(obs).log_prob(act)
-        return -(logp * weights).mean()
+        if episode_done:
+            episode_return, episode_length = sum(episode_rewards), len(episode_rewards)
+            batch_returns.append(episode_return)
+            batch_lengths.append(episode_length)
 
-    # make optimizer
-    optimizer = Adam(logits_net.parameters(), lr=lr)
+            batch_weights += [episode_return] * episode_length
 
-    # for training policy
-    def train_one_epoch():
-        # make some empty lists for logging.
-        batch_obs = []          # for observations
-        batch_acts = []         # for actions
-        batch_weights = []      # for R(tau) weighting in policy gradient
-        batch_rets = []         # for measuring episode returns
-        batch_lens = []         # for measuring episode lengths
-
-        # reset episode-specific variables
-        obs = env.reset()       # first obs comes from starting distribution
-        done = False            # signal from environment that episode is over
-        ep_rews = []            # list for rewards accrued throughout ep
-
-        # render first episode of each epoch
-        finished_rendering_this_epoch = False
-
-        # collect experience by acting in the environment with current policy
-        while True:
-
-            # rendering
-            if (not finished_rendering_this_epoch) and render:
+            if (not rendered_epoch) and render:
                 env.render()
 
-            # save obs
-            batch_obs.append(obs.copy())
+            observation = env.reset()
+            episode_done = False
+            episode_rewards = []
 
-            # act in the environment
-            act = get_action(torch.as_tensor(obs, dtype=torch.float32, device=device))
-            obs, rew, done, _ = env.step(act)
+            rendered_epoch = True
 
-            # save action, reward
-            batch_acts.append(act)
-            ep_rews.append(rew)
-
-            if done:
-                # if episode is over, record info about episode
-                ep_ret, ep_len = sum(ep_rews), len(ep_rews)
-                batch_rets.append(ep_ret)
-                batch_lens.append(ep_len)
-
-                # the weight for each logprob(a|s) is R(tau)
-                batch_weights += [ep_ret] * ep_len
-
-                # Render the final state before resetting
-                if (not finished_rendering_this_epoch) and render:
-                    env.render()
-
-                # reset episode-specific variables
-                obs, done, ep_rews = env.reset(), False, []
-
-                # won't render again this epoch
-                finished_rendering_this_epoch = True
-
-                # end experience loop if we have enough of it
-                if len(batch_obs) > batch_size:
-                    break
-
-        # take a single policy gradient update step
+            if len(batch_observations) > min_batch_size:
+                break
+    if not inference_mode:
         optimizer.zero_grad()
-        batch_loss = compute_loss(obs=torch.as_tensor(np.array(batch_obs), dtype=torch.float32, device=device),
-                                  act=torch.as_tensor(np.array(batch_acts), dtype=torch.int32, device=device),
-                                  weights=torch.as_tensor(np.array(batch_weights), dtype=torch.float32, device=device)
-                                  )
+
+        batch_observations_ = torch.as_tensor(
+            np.array(batch_observations),
+            dtype=torch.float32,
+            device=device)
+
+        batch_actions_ = torch.as_tensor(
+            np.array(batch_actions),
+            dtype=torch.int32,
+            device=device)
+
+        batch_weights_ = torch.as_tensor(
+            np.array(batch_weights),
+            dtype=torch.float32,
+            device=device)
+
+        batch_loss = compute_loss(
+            policy_network,
+            batch_observations_,
+            batch_actions_,
+            batch_weights_)
+
         batch_loss.backward()
         optimizer.step()
-        torch.save(logits_net, save_file)
-        return batch_loss, batch_rets, batch_lens
 
-    # training loop
-    for i in range(epochs):
-        batch_loss, batch_rets, batch_lens = train_one_epoch()
-        with open(log_file, 'a') as f:
-            info = 'epoch: %3d loss: %.3f return: %.3f ep_len: %.3f' % (i, batch_loss, np.mean(batch_rets), np.mean(batch_lens))
-            print(info)
-            f.write(info + '\n')
+    else:
+        batch_loss = None
+
+    return batch_loss, batch_returns, batch_lengths
+            
+
+
+def run(env_type, *, lr=0.01, max_epochs=None, min_batch_size=5000, render=False, file_path=None, inference_mode=False):
+    if not issubclass(env_type, gym.Env):
+        raise TypeError(f'env_type must be a gym.Env')
+
+    env = env_type()
+
+    if not isinstance(env.observation_space, gym.spaces.Box):
+        raise RuntimeError('Expected a continuous state space')
+
+    if not isinstance(env.action_space, gym.spaces.Discrete):
+        raise RuntimeError('Expected a discrete action space')
+
+    if inference_mode:
+        if file_path is None:
+            raise RuntimeError((
+                'Cannot run inference mode without an existing trained policy. '
+                'Please specify `file_path`'))
+        elif not os.path.exists(file_path):
+            raise RuntimeError((
+                f'File "{file_path}" does not exist, and inference mode is '
+                'turned on. You must either use an existing file or turn off '
+                'inference mode to create a new one.'))
+
+        policy_network = torch.load(file_path)
+
+    else:
+        # Load the policy from file if the file exists. Otherwise, create a
+        # new policy network
+
+        # If file path was given and the file exists, load the network from
+        # the file. Otherwise, create a new one
+        if file_path is not None and os.path.exists(file_path):
+            policy_network = torch.load(file_path)
+
+        else:
+            policy_network = create_policy_network(env.observation_space, env.action_space)
+
+    optimizer = Adam(policy_network.parameters(), lr=lr)
+
+    i = 0
+    while max_epochs is None or i < max_epochs:
+        batch_loss, batch_returns, batch_lengths = run_one_epoch(
+            env,
+            policy_network,
+            optimizer,
+            render=render,
+            min_batch_size=min_batch_size,
+            inference_mode=inference_mode)
+
+        if inference_mode:
+            info = 'epoch: %3d loss: None return: %.3f ep_len: %.3f' % (i, np.mean(batch_returns), np.mean(batch_lengths))
+        else:
+            info = 'epoch: %3d loss: %.3f return: %.3f ep_len: %.3f' % (i, batch_loss, np.mean(batch_returns), np.mean(batch_lengths))
+        print(info)
+
+
+        # If not using inference mode and file path was given, save the
+        # policy to the file
+        if not inference_mode and file_path is not None:
+            torch.save(policy_network, file_path)
+
+        i += 1
 
 if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser()
-    #parser.add_argument('--env_name', '--env', type=str, default='CartPole-v0')
-    parser.add_argument('--render', action='store_true')
-    parser.add_argument('--lr', type=float, default=1e-2)
+
+    parser.add_argument(
+        '--render',
+        action='store_true',
+        help='render the environment at each step')
+
+    parser.add_argument(
+        '--lr',
+        type=float,
+        default=0.01,
+        help='learning rate for the optimizer')
+
+    parser.add_argument(
+        '--file_path',
+        type=str,
+        help='file to load/save trained policy network')
+
+    parser.add_argument(
+        '--inference_mode',
+        action='store_true',
+        help='run a trained policy without training')
+
     args = parser.parse_args()
-    train(env_type_or_name=TrenchRunnerEnv, render=args.render, lr=args.lr, epochs=200_000)
+
+    min_batch_size = 0 if args.inference_mode else 5_000
+
+    run(TrenchRunnerEnv,
+        lr=args.lr,
+        max_epochs=None,
+        min_batch_size=min_batch_size,
+        render=args.render,
+        file_path=args.file_path,
+        inference_mode=args.inference_mode)
+
